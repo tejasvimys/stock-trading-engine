@@ -84,7 +84,7 @@ def _narrative_daily(
         if chg < -3:
             actions.append(
                 f"Avoid chasing {losers[0].name or losers[0].symbol} today; "
-                f"wait for stabilisation."
+                f"wait for stabilization."
             )
 
     return " ".join(summary_parts), key_obs, actions

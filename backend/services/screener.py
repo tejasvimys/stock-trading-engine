@@ -120,14 +120,7 @@ async def screen_stocks(screener_filter: ScreenerFilter) -> List[StockSummary]:
             indicators=ind,
         )
 
-        dummy_filter = ScreenerFilter(
-            rsi_min=screener_filter.rsi_min,
-            rsi_max=screener_filter.rsi_max,
-            macd_signal=screener_filter.macd_signal,
-            bb_position=screener_filter.bb_position,
-            min_volume=screener_filter.min_volume,
-        )
-        if _passes_filter(stock, dummy_filter, bb_pos, macd_str):
+        if _passes_filter(stock, screener_filter, bb_pos, macd_str):
             results.append(stock)
 
     # Sorting
