@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Column, Float, Integer, String, delete, select, update
+from sqlalchemy import Column, Float, Integer, String, delete, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -34,8 +34,15 @@ class HoldingORM(Base):
 
 
 async def init_db() -> None:
+    # Import additional services that register ORM models on the shared metadata.
+    from services import paper_trading_service  # noqa: F401
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        columns = await conn.execute(text("PRAGMA table_info(paper_positions)"))
+        column_names = {row[1] for row in columns.fetchall()}
+        if "side" not in column_names:
+            await conn.execute(text("ALTER TABLE paper_positions ADD COLUMN side VARCHAR NOT NULL DEFAULT 'LONG'"))
 
 
 async def add_holding(req: AddHoldingRequest) -> PortfolioHolding:

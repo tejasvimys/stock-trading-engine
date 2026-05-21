@@ -5,7 +5,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
-from routers import insights, portfolio, signals, stocks
+from routers import insights, paper_trading, portfolio, signals, stocks
+from services.paper_scheduler import initialise_auto_trading, shutdown_auto_trading
 from services.portfolio_service import init_db
 
 logging.basicConfig(
@@ -39,6 +40,7 @@ app.add_middleware(
 app.include_router(stocks.router)
 app.include_router(signals.router)
 app.include_router(portfolio.router)
+app.include_router(paper_trading.router)
 app.include_router(insights.router)
 
 
@@ -46,7 +48,13 @@ app.include_router(insights.router)
 async def startup_event():
     logger.info("Initialising database…")
     await init_db()
+    await initialise_auto_trading()
     logger.info("Stock Trading Engine API is ready.")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await shutdown_auto_trading()
 
 
 @app.get("/", tags=["Health"])

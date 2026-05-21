@@ -21,16 +21,30 @@ class Settings(BaseSettings):
     # Scheduler intervals (minutes)
     data_sync_interval_minutes: int = 15
 
-    # Stock universe – default NSE/BSE large caps; override via .env
+    # Stock universe – default US large caps/liquid names; override via .env
     default_tickers: str = (
-        "RELIANCE.NS,TCS.NS,INFY.NS,HDFCBANK.NS,ICICIBANK.NS,"
-        "HINDUNILVR.NS,BAJFINANCE.NS,SBIN.NS,BHARTIARTL.NS,KOTAKBANK.NS,"
-        "WIPRO.NS,AXISBANK.NS,LT.NS,HCLTECH.NS,ADANIENT.NS,"
-        "MARUTI.NS,SUNPHARMA.NS,TITAN.NS,NTPC.NS,ONGC.NS"
+        "AAPL,MSFT,NVDA,AMZN,META,GOOGL,AMD,AVGO,TSLA,CRM,"
+        "JPM,LLY,COST,NFLX,UBER,ADBE,PLTR,AMAT,QCOM,PANW"
     )
+    defensive_tickers: str = "SH,PSQ"
 
     # Profit target (fraction)
     profit_target: float = 0.10
+    default_account_size: float = 5000.0
+    default_daily_profit_target: float = 20.0
+    max_positions: int = 5
+    risk_per_trade_pct: float = 0.01
+    min_hold_days: int = 3
+    max_hold_days: int = 15
+    backtest_lookback_bars: int = 120
+    paper_learning_rate: float = 0.15
+    paper_auto_trading_enabled: bool = False
+    paper_auto_cycle_interval_minutes: int = 15
+    history_cache_dir: str = ".cache/history"
+    alpha_vantage_api_key: str = ""
+    fmp_api_key: str = ""
+    finnhub_api_key: str = ""
+    provider_timeout_seconds: float = 10.0
 
 
 settings = Settings()

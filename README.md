@@ -17,7 +17,7 @@ A full-stack stock screening and trading-signal system consisting of:
 | Screen | Description |
 |--------|-------------|
 | **Stock Screener** | Filter stocks by RSI, MACD direction, Bollinger Band position, and volume. Sort results by any indicator. |
-| **Trade Signals** | AI-style buy/sell signals targeting ≥10% profit. Shows entry price, target, stop-loss, confidence score, and rationale. |
+| **Trade Signals** | Swing-trade signals with target/stop, account-aware sizing, projected profit/day, paper-trading evidence, confidence, and rationale. |
 | **Portfolio** | Add/remove holdings, track unrealised P&L, current value vs invested value, and portfolio weights. |
 | **Market Insights** | Daily/weekly AI-driven summaries: top gainers/losers, sector performance, key observations, and recommended actions. |
 
@@ -25,8 +25,14 @@ A full-stack stock screening and trading-signal system consisting of:
 | Endpoint | Description |
 |----------|-------------|
 | `GET /stocks/screen` | Screen stocks with technical-indicator filters |
-| `GET /signals` | Generate buy/sell signals (weekly or monthly timeframe) |
+| `GET /signals` | Generate buy/sell swing signals with account-aware sizing and backtest evidence |
 | `GET /portfolio` | Retrieve portfolio summary with live prices |
+| `GET /paper/summary` | Retrieve local paper portfolio, learning weights, and target progress |
+| `POST /paper/run-cycle` | Run one end-of-day long-only paper-trading cycle |
+| `POST /paper/replay` | Replay recent market days locally for learning |
+| `GET /paper/trades` | Review simulated buys/sells and realised P&L |
+| `GET /paper/snapshots` | Review the paper equity curve over time |
+| `GET /paper/strategy` | Inspect current adaptive scoring weights |
 | `POST /portfolio/holdings` | Add or average-in a holding |
 | `DELETE /portfolio/holdings/{symbol}` | Remove a holding |
 | `GET /insights` | Get daily or weekly market insights |
@@ -117,8 +123,19 @@ Key settings:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8000` | TCP port to listen on |
-| `DEFAULT_TICKERS` | Top 20 NSE stocks | Comma-separated yfinance symbols |
+| `DEFAULT_TICKERS` | 20 liquid US equities | Comma-separated primary watchlist symbols |
+| `DEFENSIVE_TICKERS` | `SH,PSQ` | Long-only inverse ETFs the engine can use during bearish conditions |
 | `PROFIT_TARGET` | `0.10` | Signal profit target (10%) |
+| `DEFAULT_ACCOUNT_SIZE` | `5000` | Default account size in USD |
+| `DEFAULT_DAILY_PROFIT_TARGET` | `20` | Daily profit target used by the planner |
+| `MAX_POSITIONS` | `5` | Maximum concurrent swing positions |
+| `RISK_PER_TRADE_PCT` | `0.01` | Max account risk per trade |
+| `PAPER_LEARNING_RATE` | `0.15` | How quickly the adaptive paper strategy reweights itself |
+| `HISTORY_CACHE_DIR` | `.cache/history` | Local on-disk history cache used to survive provider outages and backend restarts |
+| `ALPHA_VANTAGE_API_KEY` | empty | Optional Alpha Vantage key used as a rate-limited daily-history fallback |
+| `FMP_API_KEY` | empty | Financial Modeling Prep API key for provider-backed fundamentals/news/targets |
+| `FINNHUB_API_KEY` | empty | Finnhub API key for provider-backed financials/recommendations/news |
+| `PROVIDER_TIMEOUT_SECONDS` | `10` | Timeout for external provider API calls |
 | `ALLOWED_ORIGINS` | `*` | CORS origins |
 
 ### Running the API
@@ -198,14 +215,53 @@ Build → Generate Signed Bundle / APK
 
 | Indicator | Parameters | Signal logic |
 |-----------|-----------|-------------|
-| RSI | Window 14 | < 35 → oversold (buy), > 65 → overbought (sell) |
-| MACD | 12/26/9 | MACD > Signal → bullish; MACD < Signal → bearish |
-| Bollinger Bands | 20-day, 2σ | Price < lower band → buy setup; > upper band → sell setup |
-| SMA | 20-day, 50-day | Golden cross (SMA20 > SMA50) → bullish |
-| Volume | 20-day avg | Volume surge (>1.5× avg) amplifies signal strength |
-| Momentum | 5-day return | >2% → buy momentum; <-2% → sell pressure |
+| RSI | Window 14 | Bullish swing zone, pullback, and exhaustion checks |
+| MACD | 12/26/9 | Confirms bullish/bearish crossover direction |
+| Bollinger Bands | 20-day, 2σ | Distinguishes healthy continuation from stretched moves |
+| SMA | 20-day, 50-day | Trend regime and pullback context |
+| Volume | 20-day avg | Confirms participation on breakout/pullback days |
+| Momentum | 5-day / 10-day return | Rewards sustained swing direction |
 
-Signal confidence is computed as `signals_confirming / total_checks`. Only stocks scoring a clear majority in one direction are shown as BUY or SELL; the rest are filtered out as HOLD.
+Signals are ranked by a composite of signal quality, historical paper-trade results, and fit for the configured account size. BUY signals include a trade plan with recommended shares, position size, projected profit/day, and risk budget.
+
+---
+
+## Multi-Source Intelligence Layer
+
+The first local-only intelligence layer uses **free/public-access data** and folds it into the swing-ranking engine. If `FMP_API_KEY` and `FINNHUB_API_KEY` are present in your local `.env`, the backend enriches the default Yahoo-based flow with provider-backed data:
+
+| Source family | Current use in scoring |
+|---|---|
+| **Price/volume history** | Trend, momentum, volatility, and technical setup quality |
+| **Fundamentals** | Revenue growth, earnings growth, margins, ROE, and valuation context |
+| **Analyst proxies** | Recommendation key, analyst count, and median/mean target-price upside |
+| **Ownership proxies** | Insider/institutional ownership percentages |
+| **Events** | Upcoming earnings timing and event-risk penalty |
+| **News sentiment** | Headline keyword sentiment over recent news flow |
+| **Options context** | Put/call open-interest balance and implied-volatility tone |
+
+### Provider mapping
+
+| Provider | Current role |
+|---|---|
+| **Yahoo Finance** | Base price history, fallback company info, fallback options context, fallback calendar |
+| **Alpha Vantage** | Rate-limited fallback for daily historical OHLCV when Yahoo/FMP are unavailable |
+| **FMP** | Company profile, quote, price target consensus, stock news |
+| **Finnhub** | Basic financial metrics, analyst recommendation trends, company news, insider sentiment |
+
+Provider data is merged into a single normalized intelligence snapshot before the signal engine ranks trades.
+
+The backend also persists fetched historical price data to a small local cache directory so paper-trading cycles can keep running after a restart even when Yahoo/FMP are temporarily rate-limiting requests.
+
+This version is intentionally built so premium providers can be plugged in later behind the same scoring concepts. The most natural future upgrades are:
+
+1. Broker/Wall Street research feeds
+2. Historical news/sentiment archives
+3. Options-flow and dark-pool providers
+4. Insider transaction feeds with point-in-time history
+5. Economic calendar and macro surprise data
+
+**Important:** the engine can become more robust, but it still cannot guarantee profit. It should be treated as a decision-support and paper-trading system until its live paper results prove consistent.
 
 ---
 
@@ -227,6 +283,7 @@ FastAPI Backend (Python)
 - Each screen has its own ViewModel and Repository.
 - The backend is fully **async** (FastAPI + aiosqlite).
 - Stock data is cached in-memory for 15 minutes to avoid excessive API calls.
+- The paper-trading engine runs locally, simulates long-only end-of-day trades, journals outcomes in SQLite, and adapts ranking weights from realised paper-trade results.
 
 ---
 
@@ -236,6 +293,12 @@ Edit `DEFAULT_TICKERS` in `backend/.env` using valid [yfinance](https://github.c
 
 ```env
 DEFAULT_TICKERS=AAPL,MSFT,GOOGL,AMZN,NVDA
+```
+
+To let the long-only paper engine defend in weak markets, keep a small inverse-ETF sleeve in `DEFENSIVE_TICKERS`:
+
+```env
+DEFENSIVE_TICKERS=SH,PSQ
 ```
 
 US stocks use plain tickers; NSE/BSE stocks use `.NS` / `.BO` suffixes (e.g. `RELIANCE.NS`).
