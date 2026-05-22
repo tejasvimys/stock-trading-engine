@@ -1,6 +1,7 @@
 """Swing-trade signal engine with position sizing and paper-trading evidence."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -11,12 +12,8 @@ import pandas as pd
 from config import settings
 from models import BacktestSummary, IntelligenceSnapshot, TradePlan, TradeSignal
 from services.data_fetcher import (
-    build_intelligence_snapshot,
-    fetch_calendar,
-    fetch_info,
     fetch_multiple,
-    fetch_news,
-    fetch_options_summary,
+    get_cached_history,
     get_latest_price,
     get_tickers,
 )
@@ -483,7 +480,18 @@ async def generate_signals(
     )
     symbols = get_tickers()
     period = "3mo" if timeframe == "weekly" else "6mo"
-    all_data = await fetch_multiple(symbols, period=period)
+    all_data = {symbol: get_cached_history(symbol, period=period) for symbol in symbols}
+    missing_symbols = [symbol for symbol, df in all_data.items() if df.empty]
+    if missing_symbols:
+        try:
+            fetched_data = await asyncio.wait_for(
+                fetch_multiple(missing_symbols, period=period),
+                timeout=max(1.0, float(settings.signal_generation_timeout_seconds)),
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Signal generation timed out while filling %s uncached symbols", len(missing_symbols))
+            fetched_data = {symbol: pd.DataFrame() for symbol in missing_symbols}
+        all_data.update(fetched_data)
 
     buy_signals: List[TradeSignal] = []
     sell_signals: List[TradeSignal] = []
@@ -492,19 +500,11 @@ async def generate_signals(
         if df.empty or len(df) < 26:
             continue
 
-        info = fetch_info(sym)
         price = get_latest_price(df)
         if price is None:
             continue
 
-        intelligence = build_intelligence_snapshot(
-            info=info,
-            news_items=fetch_news(sym),
-            options_summary=fetch_options_summary(sym),
-            calendar=fetch_calendar(sym),
-            current_price=price,
-        )
-
+        intelligence = None
         signal_type, confidence, rationale, strategy_score = _score_stock(df, intelligence=intelligence)
         if signal_type == "HOLD":
             continue
@@ -537,7 +537,7 @@ async def generate_signals(
 
         signal = TradeSignal(
             symbol=sym,
-            name=info.get("longName") or info.get("shortName") or sym,
+            name=sym,
             signal_type=signal_type,
             confidence=confidence,
             strategy_score=rank_score,

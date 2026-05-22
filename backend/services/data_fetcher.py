@@ -287,11 +287,7 @@ def get_tickers() -> List[str]:
     )
 
 
-def fetch_history(symbol: str, period: str = "6mo", interval: str = "1d") -> pd.DataFrame:
-    """
-    Fetch OHLCV history for *symbol*.
-    Returns an empty DataFrame on failure.
-    """
+def get_cached_history(symbol: str, period: str = "6mo", interval: str = "1d") -> pd.DataFrame:
     cache_key = f"{symbol}_{period}_{interval}"
     cache_ttl = _history_cache_ttl(interval)
     fresh_cache = _get_cached_frame(cache_key, ttl=cache_ttl)
@@ -302,6 +298,28 @@ def fetch_history(symbol: str, period: str = "6mo", interval: str = "1d") -> pd.
         source_cache = _get_cached_daily_source(symbol, period, ttl=cache_ttl)
         if source_cache is not None:
             return source_cache
+
+    stale_source_cache = _get_cached_daily_source(symbol, period) if interval == "1d" else None
+    if stale_source_cache is not None and not stale_source_cache.empty:
+        return stale_source_cache
+
+    stale_cache = _get_cached_frame(cache_key)
+    if stale_cache is not None and not stale_cache.empty:
+        return stale_cache
+
+    return pd.DataFrame()
+
+
+def fetch_history(symbol: str, period: str = "6mo", interval: str = "1d") -> pd.DataFrame:
+    """
+    Fetch OHLCV history for *symbol*.
+    Returns an empty DataFrame on failure.
+    """
+    cache_key = f"{symbol}_{period}_{interval}"
+    cache_ttl = _history_cache_ttl(interval)
+    cached_history = get_cached_history(symbol, period=period, interval=interval)
+    if not cached_history.empty:
+        return cached_history
 
     stale_cache = _get_cached_frame(cache_key)
     stale_source_cache = _get_cached_daily_source(symbol, period) if interval == "1d" else None
@@ -981,11 +999,16 @@ async def fetch_multiple(
     symbols: List[str], period: str = "6mo"
 ) -> Dict[str, pd.DataFrame]:
     """Fetch histories for multiple symbols concurrently."""
-    semaphore = asyncio.Semaphore(_FETCH_CONCURRENCY_LIMIT)
+    semaphore = asyncio.Semaphore(max(1, settings.history_fetch_concurrency))
+    timeout_seconds = max(0.5, float(settings.history_fetch_timeout_seconds))
 
     async def _fetch_symbol(sym: str) -> pd.DataFrame:
         async with semaphore:
-            return await fetch_history_async(sym, period)
+            try:
+                return await asyncio.wait_for(fetch_history_async(sym, period), timeout=timeout_seconds)
+            except asyncio.TimeoutError:
+                logger.warning("Timed out fetching history for %s after %.1fs", sym, timeout_seconds)
+                return pd.DataFrame()
 
     tasks = [_fetch_symbol(sym) for sym in symbols]
     results = await asyncio.gather(*tasks, return_exceptions=True)

@@ -1,6 +1,7 @@
 """Tests for backend services (pure unit tests – no network calls)."""
 import sys
 import os
+import asyncio
 from datetime import datetime
 
 # Ensure the backend package is importable
@@ -22,6 +23,7 @@ from services.data_fetcher import (
     _parse_alpha_vantage_history,
     _set_cached_frame,
     _cache,
+    fetch_multiple,
     build_analyst_signals,
     build_event_signals,
     build_fundamental_signals,
@@ -44,6 +46,7 @@ from services.signal_engine import (
     _backtest_signal,
     _build_trade_plan,
     _compute_target_and_stop,
+    generate_signals,
     _passes_buy_quality_gate,
     _passes_trade_quality_gate,
     _score_stock,
@@ -530,6 +533,51 @@ class TestPaperTradingLearning:
         monkeypatch.setattr("services.data_fetcher.settings.default_tickers", "MSFT,NVDA,MSFT")
         monkeypatch.setattr("services.data_fetcher.settings.defensive_tickers", "SH,PSQ")
         assert get_tickers() == ["MSFT", "NVDA", "SH", "PSQ"]
+
+    def test_fetch_multiple_times_out_slow_symbols(self, monkeypatch):
+        async def slow_fetch_history_async(symbol: str, period: str = "6mo"):
+            await asyncio.sleep(0.7)
+            return _make_ohlcv(30)
+
+        monkeypatch.setattr("services.data_fetcher.fetch_history_async", slow_fetch_history_async)
+        monkeypatch.setattr("services.data_fetcher.settings.history_fetch_timeout_seconds", 0.5)
+        monkeypatch.setattr("services.data_fetcher.settings.history_fetch_concurrency", 2)
+
+        result = asyncio.run(fetch_multiple(["MSFT"], period="3mo"))
+
+        assert "MSFT" in result
+        assert result["MSFT"].empty
+
+    def test_generate_signals_uses_technical_fallback(self, monkeypatch):
+        async def fake_fetch_multiple(symbols, period="3mo"):
+            return {"MSFT": _make_trending_ohlcv(direction="up")}
+
+        monkeypatch.setattr("services.signal_engine.fetch_multiple", fake_fetch_multiple)
+        monkeypatch.setattr("services.signal_engine.get_tickers", lambda: ["MSFT"])
+        monkeypatch.setattr(
+            "services.signal_engine._score_stock",
+            lambda df, intelligence=None: ("BUY", 0.72, ["Strong trend"], 0.81),
+        )
+        monkeypatch.setattr(
+            "services.signal_engine._backtest_signal",
+            lambda df, signal_type, max_hold_days: BacktestSummary(
+                trades=5,
+                wins=3,
+                losses=2,
+                win_rate=0.6,
+                avg_return_pct=2.4,
+                expected_value_pct=2.4,
+                avg_hold_days=5,
+            ),
+        )
+
+        result = asyncio.run(generate_signals(timeframe="weekly"))
+
+        assert len(result["buy_signals"]) == 1
+        signal = result["buy_signals"][0]
+        assert signal.symbol == "MSFT"
+        assert signal.name == "MSFT"
+        assert signal.intelligence is None
 
 
 class TestMultiSourceSignals:

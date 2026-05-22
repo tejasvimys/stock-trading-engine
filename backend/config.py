@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     paper_auto_trading_enabled: bool = False
     paper_auto_cycle_interval_minutes: int = 15
     history_cache_dir: str = ".cache/history"
+    history_fetch_timeout_seconds: float = 3.0
+    history_fetch_concurrency: int = 6
+    signal_generation_timeout_seconds: float = 6.0
     alpha_vantage_api_key: str = ""
     fmp_api_key: str = ""
     finnhub_api_key: str = ""

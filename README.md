@@ -132,6 +132,9 @@ Key settings:
 | `RISK_PER_TRADE_PCT` | `0.01` | Max account risk per trade |
 | `PAPER_LEARNING_RATE` | `0.15` | How quickly the adaptive paper strategy reweights itself |
 | `HISTORY_CACHE_DIR` | `.cache/history` | Local on-disk history cache used to survive provider outages and backend restarts |
+| `HISTORY_FETCH_TIMEOUT_SECONDS` | `3` | Per-symbol timeout for history fetches so stalled market-data requests fail fast |
+| `HISTORY_FETCH_CONCURRENCY` | `6` | Maximum concurrent price-history fetches |
+| `SIGNAL_GENERATION_TIMEOUT_SECONDS` | `6` | Total time budget for filling uncached signal histories before the API falls back to cached-only results |
 | `ALPHA_VANTAGE_API_KEY` | empty | Optional Alpha Vantage key used as a rate-limited daily-history fallback |
 | `FMP_API_KEY` | empty | Financial Modeling Prep API key for provider-backed fundamentals/news/targets |
 | `FINNHUB_API_KEY` | empty | Finnhub API key for provider-backed financials/recommendations/news |
