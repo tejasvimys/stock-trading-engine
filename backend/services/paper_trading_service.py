@@ -150,6 +150,10 @@ def _date_key(value: date) -> str:
     return value.isoformat()
 
 
+def _snapshot_key(value: date) -> str:
+    return _dt_from_date(value).isoformat()
+
+
 def _dt_from_date(value: date) -> datetime:
     return datetime.combine(value, datetime.min.time())
 
@@ -570,7 +574,7 @@ async def _run_cycle_with_histories(
         strategy_state = await _get_or_create_strategy_state(session)
         await _refresh_learning_state(session, strategy_state)
 
-        snapshot_result = await session.execute(select(PaperSnapshotORM).where(PaperSnapshotORM.as_of_date == _date_key(as_of_date)))
+        snapshot_result = await session.execute(select(PaperSnapshotORM).where(PaperSnapshotORM.as_of_date == _snapshot_key(as_of_date)))
         existing_snapshot = snapshot_result.scalar_one_or_none()
         if existing_snapshot is not None:
             await session.commit()
@@ -776,7 +780,7 @@ async def _run_cycle_with_histories(
         total_return_pct = ((total_equity - account.starting_cash) / account.starting_cash * 100) if account.starting_cash else 0.0
 
         snapshot = PaperSnapshotORM(
-            as_of_date=_dt_from_date(as_of_date).isoformat(),
+            as_of_date=_snapshot_key(as_of_date),
             cash_balance=round(account.cash_balance, 2),
             market_value=round(market_value, 2),
             total_equity=round(total_equity, 2),

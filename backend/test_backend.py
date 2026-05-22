@@ -39,6 +39,7 @@ from services.paper_trading_service import (
     _default_weights,
     _derive_market_regime,
     _goal_targets,
+    _snapshot_key,
     _update_learning_weights,
 )
 from services.signal_engine import (
@@ -488,6 +489,9 @@ class TestPaperTradingLearning:
         assert goals["daily"] == 40.0
         assert goals["weekly"] == 400.0
         assert goals["monthly"] == 1600.0
+
+    def test_snapshot_key_matches_snapshot_storage_format(self):
+        assert _snapshot_key(datetime(2026, 5, 21).date()) == "2026-05-21T00:00:00"
 
     def test_format_cycle_outcome_summarises_auto_decisions(self):
         outcome = _format_cycle_outcome(datetime(2026, 5, 12), buys_count=2, sells_count=1)
