@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from models import IntelligenceSnapshot
-from services.screener import compute_indicators, _bb_position, _macd_signal_str
+from services.screener import compute_indicators, _bb_position, _macd_signal_str, screen_stocks
 from models import ScreenerFilter, TechnicalIndicators
 from models import BacktestSummary
 from services.paper_scheduler import _format_cycle_outcome, _initial_next_run_time
@@ -201,6 +201,21 @@ class TestScreenerFilter:
         assert f.rsi_max == 70
         assert f.macd_signal == "bullish"
         assert f.limit == 10
+
+    def test_screen_stocks_uses_technical_fallback(self, monkeypatch):
+        async def fake_fetch_multiple(symbols, period="6mo"):
+            return {}
+
+        monkeypatch.setattr("services.screener.get_tickers", lambda: ["MSFT"])
+        monkeypatch.setattr("services.screener.get_cached_history", lambda symbol, period="6mo": _make_ohlcv(60))
+        monkeypatch.setattr("services.screener.fetch_multiple", fake_fetch_multiple)
+
+        results = asyncio.run(screen_stocks(ScreenerFilter(limit=10)))
+
+        assert len(results) == 1
+        assert results[0].symbol == "MSFT"
+        assert results[0].name == "MSFT"
+        assert results[0].market_cap is None
 
 
 class TestSignalEngine:

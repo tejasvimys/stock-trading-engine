@@ -1,6 +1,7 @@
 """Technical indicator computation and stock screening logic."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import List, Optional
 
@@ -11,10 +12,11 @@ from ta.momentum import RSIIndicator
 from ta.trend import MACD, EMAIndicator, SMAIndicator
 from ta.volatility import BollingerBands
 
+from config import settings
 from models import ScreenerFilter, StockSummary, TechnicalIndicators
 from services.data_fetcher import (
-    fetch_info,
     fetch_multiple,
+    get_cached_history,
     get_change_pct,
     get_latest_price,
     get_tickers,
@@ -98,12 +100,24 @@ def _passes_filter(
 async def screen_stocks(screener_filter: ScreenerFilter) -> List[StockSummary]:
     """Fetch data for all tickers and apply the filter."""
     symbols = get_tickers()
-    all_data = await fetch_multiple(symbols, period="6mo")
+    all_data = {symbol: get_cached_history(symbol, period="6mo") for symbol in symbols}
+    missing_symbols = [symbol for symbol, df in all_data.items() if df.empty]
+    if missing_symbols:
+        try:
+            fetched_data = await asyncio.wait_for(
+                fetch_multiple(missing_symbols, period="6mo"),
+                timeout=max(1.0, float(settings.signal_generation_timeout_seconds)),
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Screener timed out while filling %s uncached symbols", len(missing_symbols))
+            fetched_data = {symbol: pd.DataFrame() for symbol in missing_symbols}
+        all_data.update(fetched_data)
 
     results: List[StockSummary] = []
 
     for sym, df in all_data.items():
-        info = fetch_info(sym)
+        if df.empty:
+            continue
         price = get_latest_price(df)
         change = get_change_pct(df)
         ind = compute_indicators(df)
@@ -112,11 +126,11 @@ async def screen_stocks(screener_filter: ScreenerFilter) -> List[StockSummary]:
 
         stock = StockSummary(
             symbol=sym,
-            name=info.get("longName") or info.get("shortName") or sym,
+            name=sym,
             current_price=price,
             change_pct=change,
             volume=int(df["Volume"].iloc[-1]) if not df.empty else None,
-            market_cap=info.get("marketCap"),
+            market_cap=None,
             indicators=ind,
         )
 
